@@ -144,7 +144,7 @@ function parseElement(ctx, ref, byEl, part, owner, idPrefix, inherited, groupFil
     if ((0, xml_1.is)(el, 'p:sp') || (0, xml_1.is)(el, 'p:cxnSp')) {
         const isConnector = (0, xml_1.is)(el, 'p:cxnSp');
         const txBody = (0, xml_1.kid)(el, 'p:txBody');
-        const text = txBody ? parseTextBody(ctx, el, txBody, src, owner) : undefined;
+        const text = txBody ? parseTextBody(ctx, el, txBody, src, owner, part) : undefined;
         return {
             ...base,
             kind: 'shape',
@@ -787,7 +787,7 @@ function spacingPt(el, sizePt) {
         return (((0, xml_1.numAttr)(pct, 'val') ?? 0) / 100000) * sizePt * 1.2;
     return undefined;
 }
-function parseTextBody(ctx, el, txBody, src, owner) {
+function parseTextBody(ctx, el, txBody, src, owner, part) {
     const chain = (0, inherit_1.textChain)(ctx, el, src, owner);
     const bodyAttr = (get) => {
         for (const b of chain.bodyPrs) {
@@ -807,7 +807,7 @@ function parseTextBody(ctx, el, txBody, src, owner) {
     const norm = autofit && (0, xml_1.is)(autofit, 'a:normAutofit') ? autofit : undefined;
     const paragraphs = (0, xml_1.kids)(txBody)
         .filter((k) => (0, xml_1.is)(k, 'a:p'))
-        .map((p, pi) => parseParagraph(ctx, chain, p, pi));
+        .map((p, pi) => parseParagraph(ctx, chain, p, pi, part));
     return {
         paragraphs,
         anchor,
@@ -823,7 +823,21 @@ function parseTextBody(ctx, el, txBody, src, owner) {
         vertical,
     };
 }
-function parseParagraph(ctx, chain, p, pi) {
+/** 外部の URL として持つ長さの上限（細工した pptx で、モデルを大きくしないように。ADR-0019）。 */
+const LINK_URL_MAX = 2048;
+/** ハイパーリンク（a:hlinkClick）の行き先。r:id を、文字のあるパーツ part の rels で解決する。 */
+function linkOf(ctx, part, h) {
+    const id = h ? (0, xml_1.attr)(h, 'r:id') : undefined;
+    if (!h || !id)
+        return undefined;
+    const rel = (0, package_1.relById)(ctx.r, part, id);
+    if (!rel)
+        return undefined;
+    if (rel.external)
+        return rel.rawTarget.length <= LINK_URL_MAX ? { url: rel.rawTarget } : undefined;
+    return ((0, xml_1.attr)(h, 'action') ?? '').startsWith('ppaction://hlinksldjump') ? { slidePart: rel.target } : undefined;
+}
+function parseParagraph(ctx, chain, p, pi, part) {
     const pPr = (0, xml_1.kid)(p, 'a:pPr');
     const level = Math.min(8, Math.max(0, (0, xml_1.numAttr)(pPr, 'lvl') ?? 0));
     const entries = (0, inherit_1.levelPPrs)(chain, level);
@@ -834,7 +848,8 @@ function parseParagraph(ctx, chain, p, pi) {
     const runs = [];
     runChildren(p).forEach((r, ri) => {
         const rPr = (0, xml_1.kid)(r, 'a:rPr');
-        const hasLink = !!(0, xml_1.kid)(rPr, 'a:hlinkClick');
+        const hlink = (0, xml_1.kid)(rPr, 'a:hlinkClick');
+        const hasLink = !!hlink;
         const kind = (0, xml_1.is)(r, 'a:br') ? 'break' : (0, xml_1.is)(r, 'a:fld') ? 'field' : 'text';
         const run = {
             kind,
@@ -845,6 +860,9 @@ function parseParagraph(ctx, chain, p, pi) {
         };
         if (hasLink)
             run.hasLink = true;
+        const link = linkOf(ctx, part, hlink);
+        if (link)
+            run.link = link;
         runs.push(run);
     });
     const endRPr = (0, xml_1.kid)(p, 'a:endParaRPr');
@@ -995,7 +1013,7 @@ function parseCell(ctx, tc, part, owner, style, flags, row, col, nRows, nCols) {
     const chain = cellChain(ctx, tc, st.text, owner);
     const paragraphs = (0, xml_1.kids)(txBody)
         .filter((k) => (0, xml_1.is)(k, 'a:p'))
-        .map((p, pi) => parseParagraph(ctx, chain, p, pi));
+        .map((p, pi) => parseParagraph(ctx, chain, p, pi, part));
     const anchorRaw = (0, xml_1.attr)(tcPr, 'anchor') ?? 't';
     const vertRaw = (0, xml_1.attr)(tcPr, 'vert') ?? 'horz';
     const text = {
