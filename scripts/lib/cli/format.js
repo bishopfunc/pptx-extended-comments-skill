@@ -7,6 +7,7 @@ exports.formatOutline = formatOutline;
 exports.filterThreadList = filterThreadList;
 exports.formatThreads = formatThreads;
 const comments_1 = require("../shared/comments.js");
+const model_1 = require("../shared/model.js");
 function kindOf(e) {
     switch (e.kind) {
         case 'shape':
@@ -19,8 +20,6 @@ function kindOf(e) {
             return 'other';
     }
 }
-const pct = (v, total) => (total > 0 ? Math.round((v / total) * 1000) / 10 : 0);
-const EMU_PER_PT = 12700;
 /**
  * 文字の大きさと、枠からはみ出すおそれ（エージェントはスライドを見られないので、手がかりを出す）。
  * はみ出しは、文字の幅（和文は 1 文字が大きさと同じ、欧文は 0.55 倍）で行数を数え、行の高さを大きさの 1.2 倍として見積もる。
@@ -28,15 +27,15 @@ const EMU_PER_PT = 12700;
 function textHints(body, x) {
     const sizes = [];
     const scale = body.fontScale || 1;
-    const width = Math.max(0, x.cx - body.insets.l - body.insets.r) / EMU_PER_PT;
-    const height = Math.max(0, x.cy - body.insets.t - body.insets.b) / EMU_PER_PT;
+    const width = Math.max(0, x.cx - body.insets.l - body.insets.r) / model_1.EMU_PER_PT;
+    const height = Math.max(0, x.cy - body.insets.t - body.insets.b) / model_1.EMU_PER_PT;
     let used = 0;
     for (const p of body.paragraphs) {
         const lineSpacing = (p.lineSpacing ?? 1) * (1 - (body.lineSpaceReduction || 0));
         let lineMax = p.endSize * scale;
         let lineWidth = 0;
         let lines = 1;
-        const indent = Math.max(0, (p.marginLeft + p.indent) / EMU_PER_PT);
+        const indent = Math.max(0, (p.marginLeft + p.indent) / model_1.EMU_PER_PT);
         for (const r of p.runs) {
             const size = r.resolved.size * scale;
             if (r.kind === 'break') {
@@ -83,7 +82,7 @@ function outlineOf(doc) {
                     ...(e.placeholder ? { placeholder: e.placeholder.type } : {}),
                     ...(group ? { group } : {}),
                     box: { x: x.x, y: x.y, w: x.cx, h: x.cy },
-                    boxPct: { x: pct(x.x, cx), y: pct(x.y, cy), w: pct(x.cx, cx), h: pct(x.cy, cy) },
+                    bboxPt: (0, model_1.bboxPt)(x),
                 };
                 if (e.kind === 'shape' && e.text)
                     Object.assign(o, textHints(e.text, x));
@@ -157,7 +156,8 @@ function parseSlideFilter(v, count) {
     return out;
 }
 function formatOutline(o) {
-    const out = [];
+    // 単位はここで 1 回だけ書き、図形の行は bbox [左, 上, 右, 下] の数だけにする
+    const out = [`スライドの大きさ [${(0, model_1.ptOf)(o.slideSize.cx)}, ${(0, model_1.ptOf)(o.slideSize.cy)}]。図形の bbox は [左, 上, 右, 下]。どちらも pt（1pt = 12700 EMU）`];
     for (const s of o.slides) {
         const c = s.comments.open || s.comments.resolved ? `  コメント 未解決 ${s.comments.open}・解決済み ${s.comments.resolved}` : '';
         out.push(`スライド ${s.number}（ID ${s.id}）「${s.title}」${s.layout ? `  レイアウト：${s.layout}` : ''}${s.hidden ? '  スキップ' : ''}${c}`);
@@ -165,10 +165,9 @@ function formatOutline(o) {
             const indent = e.group ? '    ' : '  ';
             const ph = e.placeholder ? `（プレースホルダー ${e.placeholder}）` : '';
             const grp = e.group ? `（グループ #${e.group} の中）` : '';
-            const b = e.boxPct;
             const f = e.fontPt ? `  文字 ${e.fontPt.min === e.fontPt.max ? e.fontPt.min : `${e.fontPt.min}〜${e.fontPt.max}`}pt` : '';
             const over = e.mayOverflow ? '  ⚠ 枠からはみ出すおそれ（見積もり）' : '';
-            out.push(`${indent}#${e.cNvPrId} ${KIND_LABEL[e.kind]}${ph}${grp}「${e.name}」 位置 ${b.x}%,${b.y}% 大きさ ${b.w}%×${b.h}%${f}${over}`);
+            out.push(`${indent}#${e.cNvPrId} ${KIND_LABEL[e.kind]}${ph}${grp}「${e.name}」 bbox [${e.bboxPt.join(', ')}]${f}${over}`);
             for (const l of e.lines ?? [])
                 out.push(`${indent}    ${String(l.start).padStart(4)}│ ${l.text}`);
             for (const row of e.table ?? [])

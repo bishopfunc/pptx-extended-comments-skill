@@ -52,6 +52,7 @@ CLI はネットワークに接続せず、ほかのプログラムも実行し�
 | `lib/shared/commentImages.js` | `src/shared/commentImages.ts` | コメントの添付画像の検査（PNG/JPEG の data URL の形式、署名、サイズ、画素数）と、画像の名前の整え方。 |
 | `lib/shared/comments.js` | `src/shared/comments.ts` | レビューコメントの表示用モデルと、編集操作のアンカーの指定。 |
 | `lib/shared/gitUri.js` | `src/shared/gitUri.ts` | git の版の pptx（git: の URI）の扱い。 |
+| `lib/shared/model.js` | `src/shared/model.ts` | 表示用モデル。 |
 | `lib/shared/own.js` | `src/shared/own.ts` | 表（プレーンなオブジェクト）を、外から来たキー（pptx の中身、Webview のメッセージ）で引くとき、 __proto__・constructor・toString などの組み込みの名前を値とみなさないための関数。 |
 | `lib/shared/saveTarget.js` | `src/shared/saveTarget.ts` | 新しいプレゼンテーションと PDF の保存先（開いているフォルダに保存し、フォルダがないときだけ保存先を尋ねる）。 |
 | `lib/sync/fsutil.js` | `src/sync/fsutil.ts` | sync で使うファイル操作の小道具。 |
