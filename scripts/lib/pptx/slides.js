@@ -386,9 +386,48 @@ function deleteSlide(txn, op) {
         deletePart(txn, c);
     }
 }
+/** 選んだスライドをまとめて削除する（同じトランザクションで 1 枚ずつ。すべてのスライドは削除できない）。 */
+function deleteSlides(txn, op) {
+    const ids = [...new Set(op.slideIds)];
+    const pres = (0, inherit_1.readPresentation)(txn);
+    if (!ids.length)
+        (0, edit_1.reject)('削除するスライドがありません');
+    if (ids.some((id) => !pres.slides.some((x) => x.id === id)))
+        (0, edit_1.reject)('対象のスライドが見つかりません');
+    if (ids.length >= pres.slides.length)
+        (0, edit_1.reject)(exports.SLIDE_MSG.lastSlide);
+    for (const slideId of ids)
+        deleteSlide(txn, { type: 'deleteSlide', slideId });
+}
 // ---------------------------------------------------------------------------
 // 移動
 // ---------------------------------------------------------------------------
+/**
+ * 選んだスライドを、今の順のまま、選んでいないスライドの並びの toIndex の位置にまとめて移す。
+ * 目的の並びを先に決め、前から順に 1 枚ずつ moveSlide で置く（セクションの組み直しも moveSlide に任せる）。
+ */
+function moveSlides(txn, op) {
+    const pres = (0, inherit_1.readPresentation)(txn);
+    const order = pres.slides.map((x) => x.id);
+    const ids = new Set(op.slideIds);
+    if (!ids.size)
+        (0, edit_1.reject)('移動するスライドがありません');
+    if ([...ids].some((id) => !order.includes(id)))
+        (0, edit_1.reject)('対象のスライドが見つかりません');
+    const moving = order.filter((id) => ids.has(id));
+    const rest = order.filter((id) => !ids.has(id));
+    if (!Number.isInteger(op.toIndex) || op.toIndex < 0 || op.toIndex > rest.length)
+        (0, edit_1.reject)(exports.SLIDE_MSG.badIndex);
+    const target = [...rest.slice(0, op.toIndex), ...moving, ...rest.slice(op.toIndex)];
+    const cur = [...order];
+    target.forEach((id, i) => {
+        if (cur[i] === id)
+            return;
+        moveSlide(txn, { type: 'moveSlide', slideId: id, toIndex: i });
+        cur.splice(cur.indexOf(id), 1);
+        cur.splice(i, 0, id);
+    });
+}
 function moveSlide(txn, op) {
     const pres = (0, inherit_1.readPresentation)(txn);
     const from = pres.slides.findIndex((x) => x.id === op.slideId);
@@ -704,6 +743,12 @@ function applySlideOp(txn, op) {
             return { changes: [] };
         case 'moveSlide':
             moveSlide(txn, op);
+            return { changes: [] };
+        case 'deleteSlides':
+            deleteSlides(txn, op);
+            return { changes: [] };
+        case 'moveSlides':
+            moveSlides(txn, op);
             return { changes: [] };
         case 'setNotes':
             setNotes(txn, op);
