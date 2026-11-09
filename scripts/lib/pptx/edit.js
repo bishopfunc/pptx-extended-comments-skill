@@ -22,6 +22,7 @@ exports.copyElements = copyElements;
 exports.removeRAttr = removeRAttr;
 exports.isSafeExternalRel = isSafeExternalRel;
 exports.partResolver = partResolver;
+exports.normalizeCrop = normalizeCrop;
 exports.applyElementOp = applyElementOp;
 const own_1 = require("../shared/own.js");
 const creationIds_1 = require("./creationIds.js");
@@ -49,6 +50,8 @@ exports.MSG = {
     hiddenCell: '結合で隠れているセルは編集できません',
     badImage: '画像の形式に対応していません（png、jpeg、gif のみ）',
     emptyImage: '画像のデータが空です',
+    notPicture: 'この要素は画像ではないため、切り抜けません',
+    badCrop: '切り抜きの範囲が正しくありません',
 };
 function reject(msg) {
     throw new types_1.OpRejectedError(msg);
@@ -1177,6 +1180,58 @@ function setAltText(txn, op) {
     }
 }
 // ---------------------------------------------------------------------------
+// 画像の切り抜き（設計書 7 章「画像の切り抜き」）
+// ---------------------------------------------------------------------------
+/** 残す部分の最小（元の画像の 1%）。0 にすると画像が見えなくなり、Google スライドでも PowerPoint でも戻しにくい。 */
+const MIN_CROP_KEEP = 1000;
+/**
+ * 切り抜きの値を確かめて整数にする。各辺は、元の画像の外に広げる負の値（PowerPoint が書くことがある）も、
+ * 元の画像の幅・高さの 10 倍まで受け付ける。左右（上下）の合計は、1% 以上が残る範囲にする。
+ */
+function normalizeCrop(c) {
+    const out = { l: 0, t: 0, r: 0, b: 0 };
+    for (const k of ['l', 't', 'r', 'b']) {
+        const v = c[k];
+        if (typeof v !== 'number' || !Number.isFinite(v) || v < -1_000_000 || v >= 100_000)
+            reject(exports.MSG.badCrop);
+        out[k] = Math.round(v);
+    }
+    if (out.l + out.r > 100_000 - MIN_CROP_KEEP || out.t + out.b > 100_000 - MIN_CROP_KEEP)
+        reject(exports.MSG.badCrop);
+    return out;
+}
+/** p:blipFill/a:srcRect を書く。すべて 0 なら取り除く。a:srcRect は a:blip の直後（a:stretch / a:tile の前）に置く。 */
+function writeSrcRect(blipFill, c) {
+    let sr = (0, xml_1.kid)(blipFill, 'a:srcRect');
+    if (!c.l && !c.t && !c.r && !c.b) {
+        (0, xml_1.remove)(sr);
+        return;
+    }
+    if (!sr) {
+        sr = (0, xml_1.create)(blipFill.ownerDocument, 'a:srcRect');
+        const blip = (0, xml_1.kid)(blipFill, 'a:blip');
+        blipFill.insertBefore(sr, blip ? blip.nextSibling : blipFill.firstChild);
+    }
+    for (const k of ['l', 't', 'r', 'b'])
+        (0, xml_1.setAttr)(sr, k, c[k] ? c[k] : undefined);
+}
+function cropImage(txn, op) {
+    const f = findElement(txn, op.elementId);
+    if (f.ref.groups.length)
+        reject(exports.MSG.groupChild);
+    const crop = normalizeCrop(op.crop);
+    const pics = branches(f.ref.el).filter((b) => (0, xml_1.is)(b, 'p:pic'));
+    if (!pics.length)
+        reject(exports.MSG.notPicture);
+    for (const pic of pics) {
+        const bf = (0, xml_1.kid)(pic, 'p:blipFill');
+        if (!bf)
+            reject(exports.MSG.notPicture);
+        writeSrcRect(bf, crop);
+    }
+    writeXfrm(f.ref.el, op.xfrm, false);
+}
+// ---------------------------------------------------------------------------
 // 振り分け
 // ---------------------------------------------------------------------------
 function applyElementOp(txn, op, clip) {
@@ -1215,6 +1270,9 @@ function applyElementOp(txn, op, clip) {
             return { changes: [] };
         case 'setAltText':
             setAltText(txn, op);
+            return { changes: [] };
+        case 'cropImage':
+            cropImage(txn, op);
             return { changes: [] };
         default:
             return undefined;
